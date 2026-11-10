@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>音楽 → MIDI 変換</title>
+<script src="https://cdn.jsdelivr.net/npm/@tonejs/midi@2.0.28/build/Midi.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d1d1f; --sub: #6b6b70; --line: #e3e1da;
+    --accent: #e4572e; --accent-ink: #fff; --roll: #fbfaf7;
+    --p-all: #e4572e; --p-vocals: #e4572e; --p-other: #2a7de1; --p-bass: #2e9e5b; --p-drums: #8a5cd6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #141416; --card: #1e1e21; --ink: #f2f2f3; --sub: #9a9aa2; --line: #313136; --roll: #18181b;
+            --p-all: #ff7a50; --p-vocals: #ff7a50; --p-other: #5aa2ff; --p-bass: #4cc47e; --p-drums: #b48cff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font-family: "Hiragino Sans", "Yu Gothic UI", "Meiryo", system-ui, sans-serif; line-height: 1.6; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 16px 80px; }
+  h1 { font-size: 28px; margin: 0 0 4px; letter-spacing: .02em; }
+  h2 { font-size: 17px; margin: 0; }
+  .lead { color: var(--sub); margin: 0 0 28px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; margin-bottom: 18px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 18px; }
+  .tab { flex: 1; padding: 10px; border: 1px solid var(--line); background: transparent; color: var(--ink);
+         border-radius: 10px; font: inherit; cursor: pointer; }
+  .tab[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  .drop { border: 2px dashed var(--line); border-radius: 12px; padding: 34px 16px; text-align: center;
+          cursor: pointer; transition: .15s; }
+  .drop.over, .drop:hover { border-color: var(--accent); }
+  .drop strong { display: block; font-size: 17px; }
+  .drop span { color: var(--sub); font-size: 14px; }
+  input[type=url] { width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px;
+                    background: var(--bg); color: var(--ink); font: inherit; }
+  .hint { color: var(--sub); font-size: 13px; margin: 8px 0 0; }
+  details summary { cursor: pointer; font-weight: 600; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; margin-top: 14px; }
+  @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  label { font-size: 14px; display: block; }
+  label small { color: var(--sub); display: block; font-size: 12px; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  input[type=checkbox] { accent-color: var(--accent); width: 17px; height: 17px; vertical-align: -3px; }
+  input[type=number] { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px;
+                       background: var(--bg); color: var(--ink); font: inherit; }
+  .switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
+  .switch input { width: 44px; height: 24px; appearance: none; background: var(--line); border-radius: 99px;
+                  position: relative; cursor: pointer; flex: none; transition: .15s; }
+  .switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px;
+                         background: #fff; border-radius: 50%; transition: .15s; }
+  .switch input:checked { background: var(--accent); }
+  .switch input:checked::after { left: 23px; }
+  .parts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--line);
+          border-radius: 99px; font-size: 14px; cursor: pointer; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 12px 22px;
+         border: 0; border-radius: 10px; font: inherit; font-weight: 700; cursor: pointer;
+         background: var(--accent); color: var(--accent-ink); text-decoration: none; }
+  .btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .btn.small { padding: 6px 12px; font-size: 13px; font-weight: 600; }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .go { width: 100%; font-size: 17px; padding: 15px; }
+  .status { margin-top: 12px; min-height: 1.6em; color: var(--sub); }
+  .status.err { color: #d93025; }
+  .spinner { width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent;
+             border-radius: 50%; animation: spin .8s linear infinite; display: inline-block; vertical-align: -3px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #result { display: none; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .meta { color: var(--sub); font-size: 14px; margin: 4px 0 14px; word-break: break-all; }
+  .rollwrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--roll); margin-bottom: 14px; }
+  canvas { display: block; }
+  .file-name { margin-top: 10px; font-weight: 600; word-break: break-all; }
+  .tracks { margin: 0 0 16px; border-top: 1px solid var(--line); }
+  .track { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .track .nm { flex: 1; font-weight: 600; }
+  .track .nm small { color: var(--sub); font-weight: 400; margin-left: 6px; }
+  .formats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  @media (max-width: 560px) { .formats { grid-template-columns: 1fr; } }
+  .fmt { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line);
+         border-radius: 10px; cursor: pointer; }
+  .fmt:has(input:checked) { border-color: var(--accent); }
+  .fmt input { accent-color: var(--accent); margin-top: 4px; flex: none; }
+  .fmt small { display: block; color: var(--sub); font-size: 12px; }
+  .track label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); cursor: pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>音楽 → MIDI 変換</h1>
+  <p class="lead">MP3・WAV の音声や YouTube の曲から、MIDIファイル（SMF形式 .mid）を作ります。</p>
+
+  <section class="card">
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-tab="file">音声ファイル</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="youtube">YouTube リンク</button>
+    </div>
+
+    <div data-panel="file">
+      <div class="drop" id="drop">
+        <strong>ここにファイルをドロップ</strong>
+        <span>またはクリックして選ぶ（MP3 / WAV / M4A / FLAC / OGG など）</span>
+        <input type="file" id="file" accept="audio/*,.mp3,.wav,.m4a,.flac,.ogg,.aac" hidden>
+      </div>
+      <div class="file-name" id="fileName"></div>
+    </div>
+
+    <div data-panel="youtube" hidden>
+      <input type="url" id="url" placeholder="https://www.youtube.com/watch?v=...">
+      <p class="hint">1曲15分まで。自分で権利を持っている曲や、利用が許可された曲だけに使ってください。</p>
+    </div>
+  </section>
+
+  <section class="card">
+    <label class="switch">
+      <span><h2>パート分けする</h2>
+        <small>AI でボーカル・伴奏・ベース・ドラムに分けて、パートごとに別トラックにします（時間が数倍かかります）</small></span>
+      <input type="checkbox" id="separate" checked>
+    </label>
+    <div class="parts" id="partPicker">
+      <label class="chip"><input type="checkbox" value="vocals" checked><span class="dot" style="background:var(--p-vocals)"></span>ボーカル</label>
+      <label class="chip"><input type="checkbox" value="other" checked><span class="dot" style="background:var(--p-other)"></span>その他の伴奏（ギター・ピアノ等）</label>
+      <label class="chip"><input type="checkbox" value="bass" checked><span class="dot" style="background:var(--p-bass)"></span>ベース</label>
+      <label class="chip"><input type="checkbox" value="drums" checked><span class="dot" style="background:var(--p-drums)"></span>ドラム</label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>出力形式（SMF）</h2>
+    <div class="formats">
+      <label class="fmt"><input type="radio" name="smf" value="1" checked>
+        <span><b>SMF フォーマット1</b><small>パートごとに別トラック。DAW・作曲ソフトで編集するならこちら</small></span></label>
+      <label class="fmt"><input type="radio" name="smf" value="0">
+        <span><b>SMF フォーマット0</b><small>全部を1トラックにまとめる。古いキーボード・カラオケ・ゲーム機などで読めないときはこちら</small></span></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <details>
+      <summary>詳しい設定（任意）</summary>
+      <div class="grid">
+        <label>音の検出感度 <output id="onsetV">0.50</output>
+          <small>低くすると音が増え、高くすると確実な音だけ残ります</small>
+          <input type="range" id="onset" min="0.1" max="0.9" step="0.05" value="0.5">
+        </label>
+        <label>音の持続しきい値 <output id="frameV">0.30</output>
+          <small>低くすると音が長く・多くなります</small>
+          <input type="range" id="frame" min="0.1" max="0.9" step="0.05" value="0.3">
+        </label>
+        <label>最短の音の長さ（ミリ秒）
+          <small>これより短いノイズ的な音は捨てます</small>
+          <input type="number" id="minNote" min="10" max="2000" value="120">
+        </label>
+        <label>テンポ（BPM）
+          <small>MIDIファイルに書き込むテンポ</small>
+          <input type="number" id="tempo" min="20" max="300" value="120">
+        </label>
+        <label>最低周波数（Hz, 0=制限なし）
+          <small>パート分けしないときだけ使います</small>
+          <input type="number" id="minFreq" min="0" max="5000" value="0">
+        </label>
+        <label>最高周波数（Hz, 0=制限なし）
+          <small>パート分けしないときだけ使います</small>
+          <input type="number" id="maxFreq" min="0" max="10000" value="0">
+        </label>
+      </div>
+    </details>
+  </section>
+
+  <button class="btn go" id="go">MIDI に変換する</button>
+  <div class="status" id="status"></div>
+
+  <section class="card" id="result">
+    <h2>変換できました</h2>
+    <p class="meta" id="meta"></p>
+    <div class="rollwrap"><canvas id="roll" height="280"></canvas></div>
+    <div class="tracks" id="tracks"></div>
+    <div class="row">
+      <a class="btn" id="download" download>全パートの .mid をダウンロード</a>
+      <button class="btn ghost" id="play">▶ 試聴</button>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const PART = {
+  Vocals: { key: "vocals", label: "ボーカル" },
+  Other:  { key: "other",  label: "その他の伴奏" },
+  Bass:   { key: "bass",   label: "ベース" },
+  Drums:  { key: "drums",  label: "ドラム" },
+  Music:  { key: "all",    label: "全体" },
+};
+let mode = "file", selectedFile = null, midiUrl = null, midiBuf = null, midiObj = null, baseName = "converted";
+let tracks = [];   // { track, key, label, color, on }
+let voices = [], playing = false, startAt = 0;
+
+// タブ切り替え
+document.querySelectorAll(".tab").forEach((t) => t.onclick = () => {
+  mode = t.dataset.tab;
+  document.querySelectorAll(".tab").forEach((x) => x.setAttribute("aria-selected", x === t));
+  document.querySelectorAll("[data-panel]").forEach((p) => p.hidden = p.dataset.panel !== mode);
+});
+
+// ファイル選択
+const drop = $("drop");
+drop.onclick = () => $("file").click();
+$("file").onchange = (e) => pick(e.target.files[0]);
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); pick(e.dataTransfer.files[0]); };
+function pick(f) { if (!f) return; selectedFile = f; $("fileName").textContent = "選択中: " + f.name; }
+
+// パート分けスイッチ
+$("separate").onchange = () => $("partPicker").style.display = $("separate").checked ? "" : "none";
+
+["onset", "frame"].forEach((id) => $(id).oninput = () => $(id + "V").textContent = Number($(id).value).toFixed(2));
+
+function setStatus(html, err = false) { $("status").innerHTML = html; $("status").className = "status" + (err ? " err" : ""); }
+
+$("go").onclick = async () => {
+  const fd = new FormData();
+  fd.append("onset", $("onset").value);
+  fd.append("frame", $("frame").value);
+  fd.append("min_note_ms", $("minNote").value || 120);
+  fd.append("tempo", $("tempo").value || 120);
+  fd.append("min_freq", $("minFreq").value || 0);
+  fd.append("max_freq", $("maxFreq").value || 0);
+  const separate = $("separate").checked;
+  const parts = [...document.querySelectorAll("#partPicker input:checked")].map((i) => i.value);
+  if (separate && !parts.length) return setStatus("パートを1つ以上選んでください。", true);
+  fd.append("separate", separate);
+  fd.append("parts", parts.join(","));
+  const smfFormat = document.querySelector("input[name=smf]:checked").value;
+  fd.append("smf_format", smfFormat);
+
+  let endpoint;
+  if (mode === "file") {
+    if (!selectedFile) return setStatus("音声ファイルを選んでください。", true);
+    fd.append("file", selectedFile);
+    endpoint = "/api/convert/file";
+  } else {
+    const url = $("url").value.trim();
+    if (!url) return setStatus("YouTube のリンクを入力してください。", true);
+    fd.append("url", url);
+    endpoint = "/api/convert/youtube";
+  }
+
+  stop();
+  $("go").disabled = true;
+  $("result").style.display = "none";
+  const steps = [mode === "youtube" ? "YouTube から音声を取得" : null, separate ? "パートに分離" : null, "MIDI に変換"].filter(Boolean).join(" → ");
+  const t0 = Date.now();
+  const timer = setInterval(() => setStatus(`<span class="spinner"></span> ${steps} 中…（${Math.round((Date.now() - t0) / 1000)}秒経過${separate ? "・パート分けは1曲で数分かかることがあります" : ""}）`), 500);
+
+  try {
+    const res = await fetch(endpoint, { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = "変換に失敗しました。";
+      try { msg = (await res.json()).detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    const blob = await res.blob();
+    const name = fileNameFrom(res.headers.get("Content-Disposition")) || "converted.mid";
+    baseName = name.replace(/(_parts)?(_smf0)?\.mid$/i, "");
+    if (midiUrl) URL.revokeObjectURL(midiUrl);
+    midiUrl = URL.createObjectURL(blob);
+    $("download").href = midiUrl;
+    $("download").download = name;
+    $("download").textContent = `${separate ? "全パートの " : ""}SMF（フォーマット${smfFormat}）をダウンロード`;
+
+    midiBuf = await blob.arrayBuffer();
+    midiObj = new Midi(midiBuf);
+    const css = getComputedStyle(document.documentElement);
+    tracks = midiObj.tracks.map((t, idx) => ({ t, idx })).filter(({ t }) => t.notes.length).map(({ t, idx }) => {
+      const p = partOf(t, separate);
+      return { track: t, idx, key: p.key, label: p.label, color: css.getPropertyValue("--p-" + p.key).trim(), on: true };
+    });
+    const total = tracks.reduce((a, t) => a + t.track.notes.length, 0);
+    $("meta").textContent = `${name} ・ ${tracks.length} パート ・ ${total} 音 ・ ${fmt(midiObj.duration)}`;
+    renderTracks(separate);
+    $("result").style.display = "block";
+    drawRoll();
+    setStatus(tracks.length ? "" : "音を検出できませんでした。感度を下げて試してください。", !tracks.length);
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    clearInterval(timer);
+    $("go").disabled = false;
+    if ($("status").textContent.includes("経過")) setStatus("");
+  }
+};
+
+// どのパートか判定（フォーマット0はトラック名がないので音色番号で見分ける）
+function partOf(t, separate) {
+  if (PART[t.name]) return PART[t.name];
+  if (!separate) return PART.Music;
+  if (t.instrument.percussion) return PART.Drums;
+  if (t.instrument.number === 53) return PART.Vocals;
+  if (t.instrument.number === 33) return PART.Bass;
+  return PART.Other;
+}
+
+function renderTracks(separate) {
+  const box = $("tracks");
+  box.innerHTML = "";
+  box.style.display = separate ? "" : "none";
+  tracks.forEach((t, i) => {
+    const row = document.createElement("div");
+    row.className = "track";
+    row.innerHTML = `<span class="dot" style="background:${t.color}"></span>
+      <span class="nm">${t.label}<small>${t.track.notes.length} 音</small></span>
+      <label><input type="checkbox" checked> 表示・試聴</label>
+      <button class="btn ghost small">.mid</button>`;
+    row.querySelector("input").onchange = (e) => { t.on = e.target.checked; drawRoll(); if (playing) { stop(); play(); } };
+    row.querySelector("button").onclick = () => downloadPart(i);
+    box.appendChild(row);
+  });
+}
+
+// 1パートだけの MIDI を作ってダウンロード
+function downloadPart(i) {
+  const m = new Midi(midiBuf);
+  m.tracks = [m.tracks[tracks[i].idx]];
+  m.tracks[0].name = Object.keys(PART).find((k) => PART[k].key === tracks[i].key) || "Track";
+  const blob = new Blob([m.toArray()], { type: "audio/midi" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `${baseName}_${tracks[i].key}.mid`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+function fileNameFrom(cd) {
+  if (!cd) return null;
+  const star = cd.match(/filename\*=utf-8''([^;]+)/i);
+  if (star) return decodeURIComponent(star[1]);
+  const plain = cd.match(/filename="?([^";]+)"?/i);
+  return plain ? plain[1] : null;
+}
+function fmt(sec) { const m = Math.floor(sec / 60), s = Math.round(sec % 60); return `${m}:${String(s).padStart(2, "0")}`; }
+
+// ピアノロール表示（ドラムは下の帯に表示）
+const PX = 40;
+function drawRoll(playhead = null) {
+  const c = $("roll"), ctx = c.getContext("2d");
+  const H = 280, duration = midiObj ? midiObj.duration : 0;
+  const W = Math.max(c.parentElement.clientWidth, Math.ceil(duration * PX) + 20);
+  const dpr = window.devicePixelRatio || 1;
+  if (c.width !== W * dpr) { c.width = W * dpr; c.height = H * dpr; c.style.width = W + "px"; c.style.height = H + "px"; }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const css = getComputedStyle(document.documentElement);
+  const pitched = tracks.filter((t) => !t.track.instrument.percussion);
+  const drums = tracks.filter((t) => t.track.instrument.percussion);
+  const drumH = drums.length ? 40 : 0, mainH = H - drumH;
+  const all = pitched.flatMap((t) => t.track.notes);
+  if (all.length) {
+    let lo = 127, hi = 0;
+    for (const n of all) { lo = Math.min(lo, n.midi); hi = Math.max(hi, n.midi); }
+    lo -= 2; hi += 2;
+    const rowH = mainH / (hi - lo + 1);
+    ctx.fillStyle = css.getPropertyValue("--line");
+    for (let p = lo; p <= hi; p++) if ([1, 3, 6, 8, 10].includes(p % 12)) ctx.fillRect(0, mainH - (p - lo + 1) * rowH, W, rowH);
+    for (const t of pitched) {
+      if (!t.on) continue;
+      ctx.fillStyle = t.color;
+      for (const n of t.track.notes) {
+        ctx.globalAlpha = 0.45 + 0.55 * n.velocity;
+        ctx.fillRect(10 + n.time * PX, mainH - (n.midi - lo + 1) * rowH, Math.max(2, n.duration * PX), Math.max(2, rowH - 1));
+      }
+    }
+  }
+  if (drumH) {
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = css.getPropertyValue("--line");
+    ctx.fillRect(0, mainH, W, 1);
+    const lane = { 42: 0, 38: 1, 36: 2 };
+    for (const t of drums) {
+      if (!t.on) continue;
+      ctx.fillStyle = t.color;
+      for (const n of t.track.notes) {
+        ctx.globalAlpha = 0.4 + 0.6 * n.velocity;
+        ctx.fillRect(10 + n.time * PX, mainH + 4 + (lane[n.midi] ?? 1) * 12, 3, 10);
+      }
+    }
+  }
+  ctx.globalAlpha = 1;
+  if (playhead != null) {
+    ctx.fillStyle = css.getPropertyValue("--ink");
+    ctx.fillRect(10 + playhead * PX, 0, 2, H);
+  }
+}
+
+// 試聴（パートごとに音色を変える）
+function makeVoice(key) {
+  if (key === "bass") return new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.01, decay: 0.2, sustain: 0.6, release: 0.3 } });
+  if (key === "vocals") return new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sine" }, envelope: { attack: 0.03, decay: 0.1, sustain: 0.8, release: 0.3 } });
+  return new Tone.PolySynth(Tone.Synth, { oscillator: { type: "square8" }, envelope: { attack: 0.005, decay: 0.2, sustain: 0.3, release: 0.4 } });
+}
+$("play").onclick = async () => { if (playing) return stop(); await Tone.start(); play(); };
+function play() {
+  if (!midiObj) return;
+  startAt = Tone.now() + 0.1;
+  for (const t of tracks) {
+    if (!t.on) continue;
+    if (t.track.instrument.percussion) {
+      const kick = new Tone.MembraneSynth().toDestination();
+      const noise = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.15, sustain: 0 } }).toDestination();
+      const hat = new Tone.NoiseSynth({ envelope: { attack: 0.001, decay: 0.04, sustain: 0 } }).toDestination();
+      kick.volume.value = -6; noise.volume.value = -16; hat.volume.value = -24;
+      voices.push(kick, noise, hat);
+      let last = { 36: -1, 38: -1, 42: -1 };
+      for (const n of t.track.notes) {
+        const at = startAt + n.time;
+        if (at <= last[n.midi] + 0.01) continue;  // 同時刻の重複を避ける
+        last[n.midi] = at;
+        if (n.midi === 36) kick.triggerAttackRelease("C1", 0.1, at, n.velocity);
+        else if (n.midi === 42) hat.triggerAttackRelease(0.03, at, n.velocity);
+        else noise.triggerAttackRelease(0.1, at, n.velocity);
+      }
+    } else {
+      const v = makeVoice(t.key).toDestination();
+      v.volume.value = t.key === "bass" ? -8 : -14;
+      voices.push(v);
+      for (const n of t.track.notes) v.triggerAttackRelease(n.name, n.duration, startAt + n.time, n.velocity);
+    }
+  }
+  playing = true;
+  $("play").textContent = "■ 停止";
+  const wrap = document.querySelector(".rollwrap");
+  const tick = () => {
+    if (!playing) return;
+    const pos = Tone.now() - startAt;
+    if (pos > midiObj.duration + 0.5) return stop();
+    drawRoll(pos);
+    const x = 10 + pos * PX;
+    if (x > wrap.scrollLeft + wrap.clientWidth - 60 || x < wrap.scrollLeft) wrap.scrollLeft = x - 60;
+    requestAnimationFrame(tick);
+  };
+  tick();
+}
+function stop() {
+  playing = false;
+  for (const v of voices) { try { v.releaseAll?.(); v.dispose(); } catch {} }
+  voices = [];
+  $("play").textContent = "▶ 試聴";
+  if (midiObj) drawRoll();
+}
+</script>
+</body>
+</html>

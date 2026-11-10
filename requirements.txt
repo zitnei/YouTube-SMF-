@@ -1,0 +1,8 @@
+basic-pitch
+yt-dlp
+fastapi
+uvicorn[standard]
+python-multipart
+demucs
+soundfile
+setuptools<81
