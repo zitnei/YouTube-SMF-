@@ -45,6 +45,15 @@ python -m venv .venv
 
 ブラウザで http://127.0.0.1:8000 を開いてください。
 
+## Hugging Face Spaces で公開する
+
+1. https://huggingface.co でアカウントを作り、[トークン設定](https://huggingface.co/settings/tokens) で **Write** 権限のトークンを作る
+2. `.venv\Scripts\hf auth login` を実行してトークンを貼り付ける（最初の1回だけ）
+3. `.venv\Scripts\python deploy_hf.py` を実行する
+
+`https://huggingface.co/spaces/<ユーザー名>/YouTube-SMF` に公開されます（ビルドに10〜20分）。
+クラウド上では YouTube 側にアクセスを止められることが多く、YouTube リンク機能は使えない場合があります（ファイルのアップロードは使えます）。
+
 ## しくみ
 
 | 処理 | 使っているもの |

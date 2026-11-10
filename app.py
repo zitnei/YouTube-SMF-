@@ -405,7 +405,11 @@ def analyze_youtube(url: str = Form(...)):
 
 
 if __name__ == "__main__":
+    import os
+
     import uvicorn
 
-    print("\n  ブラウザで http://127.0.0.1:8000 を開いてください\n")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    host = os.environ.get("HOST", "127.0.0.1")
+    port = int(os.environ.get("PORT", "8000"))
+    print(f"\n  ブラウザで http://127.0.0.1:{port} を開いてください\n")
+    uvicorn.run(app, host=host, port=port)

@@ -1,0 +1,9 @@
+.venv/
+.git/
+__pycache__/
+*.pyc
+server.log
+.playwright-mcp/
+*.mid
+*.wav
+*.mp3
