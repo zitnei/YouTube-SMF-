@@ -6,3 +6,4 @@ server.log
 *.mid
 *.wav
 *.mp3
+web/node_modules/

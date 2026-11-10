@@ -2,6 +2,18 @@
 
 MP3・WAV などの音声ファイル、または YouTube の曲のリンクから、**MIDI ファイル（SMF 形式 .mid）** を作る Web ツールです。
 
+## すぐ使う（ブラウザ版）
+
+**https://zitnei.github.io/YouTube-SMF-/**
+
+インストール不要。変換も解析もブラウザの中だけで行うので、ファイルはどこにも送信されません。
+ブラウザ版でできるのは「ファイル → MIDI 変換（SMF 0/1）」と「音源解析」です。
+パート分けと YouTube リンクからの変換は、下の「パソコンで動かす版」で使えます。
+
+ブラウザ版のソースは `web/`、公開用にビルドしたものは `docs/` にあります（`cd web && npm install && npm run build`）。
+
+## パソコンで動かす版（全機能）
+
 ## できること
 
 - **音声ファイルから変換**：MP3 / WAV / M4A / FLAC / OGG など
@@ -44,15 +56,6 @@ python -m venv .venv
 ```
 
 ブラウザで http://127.0.0.1:8000 を開いてください。
-
-## Hugging Face Spaces で公開する
-
-1. https://huggingface.co でアカウントを作り、[トークン設定](https://huggingface.co/settings/tokens) で **Write** 権限のトークンを作る
-2. `.venv\Scripts\hf auth login` を実行してトークンを貼り付ける（最初の1回だけ）
-3. `.venv\Scripts\python deploy_hf.py` を実行する
-
-`https://huggingface.co/spaces/<ユーザー名>/YouTube-SMF` に公開されます（ビルドに10〜20分）。
-クラウド上では YouTube 側にアクセスを止められることが多く、YouTube リンク機能は使えない場合があります（ファイルのアップロードは使えます）。
 
 ## しくみ
 
