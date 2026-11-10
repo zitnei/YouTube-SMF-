@@ -289,6 +289,52 @@ def index():
     return (BASE_DIR / "static" / "index.html").read_text(encoding="utf-8")
 
 
+def save_upload(file: UploadFile, workdir: Path) -> Path:
+    src = workdir / f"input{Path(file.filename or '').suffix or '.bin'}"
+    size = 0
+    with src.open("wb") as f:
+        while chunk := file.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_UPLOAD_MB * 1024 * 1024:
+                raise HTTPException(413, f"ファイルが大きすぎます（上限 {MAX_UPLOAD_MB}MB）")
+            f.write(chunk)
+    return src
+
+
+YOUTUBE_RE = re.compile(r"^https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/", re.I)
+
+
+def download_youtube(url: str, workdir: Path) -> tuple[Path, str]:
+    """YouTube から音声だけを取り出す。戻り値は (ファイル, 曲名)。"""
+    import yt_dlp
+
+    url = url.strip()
+    if not YOUTUBE_RE.match(url):
+        raise HTTPException(400, "YouTube のリンク（youtube.com / youtu.be）を入力してください。")
+    opts = {
+        "format": "bestaudio/best",
+        "outtmpl": str(workdir / "yt.%(ext)s"),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+    }
+    try:
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if info.get("_type") == "playlist":
+                raise HTTPException(400, "プレイリストではなく1曲のリンクを入力してください。")
+            if (info.get("duration") or 0) > MAX_YOUTUBE_SECONDS:
+                raise HTTPException(400, f"動画が長すぎます（上限 {MAX_YOUTUBE_SECONDS // 60} 分）")
+            ydl.download([url])
+    except yt_dlp.utils.DownloadError as e:
+        raise HTTPException(400, f"YouTube から取得できませんでした: {str(e)[:200]}")
+    downloaded = next(workdir.glob("yt.*"), None)
+    if not downloaded:
+        raise HTTPException(500, "音声のダウンロードに失敗しました。")
+    return downloaded, info.get("title") or "youtube"
+
+
 @app.post("/api/convert/file")
 def convert_file(
     file: UploadFile = File(...),
@@ -299,21 +345,11 @@ def convert_file(
     s = read_settings(onset, frame, min_note_ms, min_freq, max_freq, tempo, separate, parts, smf_format)
     workdir = new_workdir()
     try:
-        src = workdir / f"input{Path(file.filename or '').suffix or '.bin'}"
-        size = 0
-        with src.open("wb") as f:
-            while chunk := file.file.read(1024 * 1024):
-                size += len(chunk)
-                if size > MAX_UPLOAD_MB * 1024 * 1024:
-                    raise HTTPException(413, f"ファイルが大きすぎます（上限 {MAX_UPLOAD_MB}MB）")
-                f.write(chunk)
+        src = save_upload(file, workdir)
         return midi_response(workdir, src, Path(file.filename or "converted").stem, s)
     except Exception:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
-
-
-YOUTUBE_RE = re.compile(r"^https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/", re.I)
 
 
 @app.post("/api/convert/youtube")
@@ -323,42 +359,49 @@ def convert_youtube(
     min_freq: float = Form(0), max_freq: float = Form(0), tempo: float = Form(120),
     separate: bool = Form(False), parts: str = Form(""), smf_format: int = Form(1),
 ):
-    import yt_dlp
-
-    url = url.strip()
-    if not YOUTUBE_RE.match(url):
-        raise HTTPException(400, "YouTube のリンク（youtube.com / youtu.be）を入力してください。")
-
     s = read_settings(onset, frame, min_note_ms, min_freq, max_freq, tempo, separate, parts, smf_format)
     workdir = new_workdir()
     try:
-        opts = {
-            "format": "bestaudio/best",
-            "outtmpl": str(workdir / "yt.%(ext)s"),
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "noprogress": True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                if info.get("_type") == "playlist":
-                    raise HTTPException(400, "プレイリストではなく1曲のリンクを入力してください。")
-                duration = info.get("duration") or 0
-                if duration > MAX_YOUTUBE_SECONDS:
-                    raise HTTPException(400, f"動画が長すぎます（上限 {MAX_YOUTUBE_SECONDS // 60} 分）")
-                ydl.download([url])
-        except yt_dlp.utils.DownloadError as e:
-            raise HTTPException(400, f"YouTube から取得できませんでした: {str(e)[:200]}")
-
-        downloaded = next(workdir.glob("yt.*"), None)
-        if not downloaded:
-            raise HTTPException(500, "音声のダウンロードに失敗しました。")
-        return midi_response(workdir, downloaded, info.get("title") or "youtube", s)
+        src, title = download_youtube(url, workdir)
+        return midi_response(workdir, src, title, s)
     except Exception:
         shutil.rmtree(workdir, ignore_errors=True)
         raise
+
+
+# ---------- 音源解析（PSG / FM / 波形メモリ / PCM） ----------
+
+def analyze_response(src: Path, workdir: Path, title: str) -> dict:
+    import analyze
+
+    wav = workdir / "analyze.wav"
+    ffmpeg(src, wav, analyze.SR, 1)
+    try:
+        result = analyze.analyze(str(wav))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    result["title"] = title
+    return result
+
+
+@app.post("/api/analyze/file")
+def analyze_file(file: UploadFile = File(...)):
+    workdir = new_workdir()
+    try:
+        src = save_upload(file, workdir)
+        return analyze_response(src, workdir, Path(file.filename or "audio").stem)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+
+@app.post("/api/analyze/youtube")
+def analyze_youtube(url: str = Form(...)):
+    workdir = new_workdir()
+    try:
+        src, title = download_youtube(url, workdir)
+        return analyze_response(src, workdir, title)
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
 
 
 if __name__ == "__main__":

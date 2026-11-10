@@ -78,6 +78,28 @@
   .track { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
   .track .nm { flex: 1; font-weight: 600; }
   .track .nm small { color: var(--sub); font-weight: 400; margin-left: 6px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 560px) { .actions { grid-template-columns: 1fr; } }
+  :root { --t-psg: #e4572e; --t-fm: #2a7de1; --t-wavetable: #2e9e5b; --t-pcm: #8a5cd6; }
+  @media (prefers-color-scheme: dark) { :root { --t-psg: #ff7a50; --t-fm: #5aa2ff; --t-wavetable: #4cc47e; --t-pcm: #b48cff; } }
+  #anResult { display: none; margin-top: 18px; }
+  #anResult h3 { font-size: 14px; margin: 20px 0 8px; color: var(--sub); }
+  .verdict { padding: 16px; border-radius: 12px; background: var(--bg); margin-bottom: 16px; }
+  .v-main { font-size: 22px; font-weight: 800; }
+  .v-family { margin-top: 4px; }
+  .v-mix { color: var(--sub); font-size: 14px; margin-top: 4px; }
+  .bar { margin: 10px 0; }
+  .bar .top { display: flex; justify-content: space-between; font-size: 14px; }
+  .bar .top b { font-weight: 700; }
+  .bar .ex { color: var(--sub); font-size: 12px; }
+  .bar .track-bg { height: 10px; background: var(--line); border-radius: 99px; overflow: hidden; margin-top: 4px; }
+  .bar .fill { height: 100%; border-radius: 99px; transition: width .6s; }
+  .timeline { display: flex; height: 22px; border-radius: 6px; overflow: hidden; background: var(--line); }
+  .timeline div { height: 100%; }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--sub); margin-top: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 4px; }
+  .evidence { margin: 0; padding-left: 20px; font-size: 14px; }
+  .evidence li { margin: 4px 0; }
   .formats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
   @media (max-width: 560px) { .formats { grid-template-columns: 1fr; } }
   .fmt { display: flex; gap: 10px; align-items: flex-start; padding: 12px; border: 1px solid var(--line);
@@ -91,7 +113,7 @@
 <body>
 <main>
   <h1>音楽 → MIDI 変換</h1>
-  <p class="lead">MP3・WAV の音声や YouTube の曲から、MIDIファイル（SMF形式 .mid）を作ります。</p>
+  <p class="lead">MP3・WAV の音声や YouTube の曲から、MIDIファイル（SMF形式 .mid）を作ります。どんな音源（PSG・FM・波形メモリ・PCM）で鳴っているかの解析もできます。</p>
 
   <section class="card">
     <div class="tabs" role="tablist">
@@ -170,8 +192,28 @@
     </details>
   </section>
 
-  <button class="btn go" id="go">MIDI に変換する</button>
+  <div class="actions">
+    <button class="btn go" id="go">MIDI に変換する</button>
+    <button class="btn go ghost" id="analyze">音源の種類を解析する</button>
+  </div>
   <div class="status" id="status"></div>
+
+  <section class="card" id="anResult">
+    <h2>音源の解析結果</h2>
+    <p class="meta" id="anMeta"></p>
+    <div class="verdict">
+      <div class="v-main" id="anBest"></div>
+      <div class="v-family" id="anFamily"></div>
+      <div class="v-mix" id="anMix"></div>
+    </div>
+    <div id="anBars"></div>
+    <h3>時間ごとの判定</h3>
+    <div class="timeline" id="anTimeline"></div>
+    <div class="legend" id="anLegend"></div>
+    <h3>判定の根拠</h3>
+    <ul class="evidence" id="anEvidence"></ul>
+    <p class="hint">波形の特徴から推定した結果です。エフェクトや音質の加工、いろいろな方式が混ざった曲では外れることがあります。</p>
+  </section>
 
   <section class="card" id="result">
     <h2>変換できました</h2>
@@ -302,6 +344,76 @@ function partOf(t, separate) {
   if (t.instrument.number === 53) return PART.Vocals;
   if (t.instrument.number === 33) return PART.Bass;
   return PART.Other;
+}
+
+// ---------- 音源解析 ----------
+const TYPE = {
+  psg:       { label: "PSG系音源",     ex: "矩形波＋ノイズ。AY-3-8910、SN76489、ファミコンの矩形波など" },
+  fm:        { label: "FM系音源",      ex: "周波数変調。YM2612（メガドライブ）、YM2203/2608（PC-88/98）、OPL など" },
+  wavetable: { label: "波形メモリ系音源", ex: "短い波形のくり返し。PCエンジン、コナミSCC、ナムコ、ゲームボーイ波形ch など" },
+  pcm:       { label: "PCM系音源",     ex: "録音した波形を再生。スーパーファミコン、GM/MIDI音源（SC-55など）、生演奏・録音 など" },
+};
+
+$("analyze").onclick = async () => {
+  const fd = new FormData();
+  let endpoint;
+  if (mode === "file") {
+    if (!selectedFile) return setStatus("音声ファイルを選んでください。", true);
+    fd.append("file", selectedFile);
+    endpoint = "/api/analyze/file";
+  } else {
+    const url = $("url").value.trim();
+    if (!url) return setStatus("YouTube のリンクを入力してください。", true);
+    fd.append("url", url);
+    endpoint = "/api/analyze/youtube";
+  }
+  $("analyze").disabled = $("go").disabled = true;
+  $("anResult").style.display = "none";
+  const t0 = Date.now();
+  const timer = setInterval(() => setStatus(`<span class="spinner"></span> ${mode === "youtube" ? "YouTube から音声を取得して" : ""}音源を解析中…（${Math.round((Date.now() - t0) / 1000)}秒経過）`), 500);
+  try {
+    const res = await fetch(endpoint, { method: "POST", body: fd });
+    if (!res.ok) {
+      let msg = "解析に失敗しました。";
+      try { msg = (await res.json()).detail || msg; } catch {}
+      throw new Error(msg);
+    }
+    renderAnalysis(await res.json());
+    setStatus("");
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    clearInterval(timer);
+    $("analyze").disabled = $("go").disabled = false;
+    if ($("status").textContent.includes("経過")) setStatus("");
+  }
+};
+
+function renderAnalysis(r) {
+  const order = Object.keys(TYPE).sort((a, b) => r.scores[b] - r.scores[a]);
+  const best = order[0], second = order[1];
+  const pct = (k) => Math.round(r.scores[k] * 100);
+  $("anMeta").textContent = `${r.title} ・ ${fmt(r.duration)}`;
+  $("anBest").innerHTML = `<span style="color:var(--t-${best})">${TYPE[best].label}</span> の可能性が高い（${pct(best)}%）`;
+  $("anFamily").textContent = best === "pcm"
+    ? "方式：PCM系（録音した波形を鳴らす方式。GM/MIDI音源や生演奏もここに入ります）"
+    : "方式：チップ合成系（音源チップが波形をその場で作って鳴らす方式）";
+  $("anMix").textContent = pct(second) >= 20 ? `${TYPE[second].label}（${pct(second)}%）も混ざっている可能性があります` : "";
+  $("anBars").innerHTML = order.map((k) => `
+    <div class="bar">
+      <div class="top"><b>${TYPE[k].label}</b><span>${pct(k)}%</span></div>
+      <div class="ex">${TYPE[k].ex}</div>
+      <div class="track-bg"><div class="fill" style="width:0;background:var(--t-${k})" data-w="${pct(k)}"></div></div>
+    </div>`).join("");
+  requestAnimationFrame(() => document.querySelectorAll("#anBars .fill").forEach((f) => f.style.width = f.dataset.w + "%"));
+  const total = r.duration;
+  $("anTimeline").innerHTML = r.timeline.map((s) =>
+    `<div title="${fmt(s.start)}〜${fmt(s.end)}：${TYPE[s.type].label}" style="width:${(s.end - s.start) / total * 100}%;background:var(--t-${s.type})"></div>`).join("");
+  $("anLegend").innerHTML = Object.keys(TYPE).map((k) => `<span><i class="dot" style="background:var(--t-${k})"></i>${TYPE[k].label}</span>`).join("")
+    + `<span>0:00 〜 ${fmt(total)}</span>`;
+  $("anEvidence").innerHTML = (r.evidence.length ? r.evidence : ["目立った特徴が見つかりませんでした"]).map((e) => `<li>${e}</li>`).join("");
+  $("anResult").style.display = "block";
+  $("anResult").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderTracks(separate) {
